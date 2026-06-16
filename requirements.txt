@@ -2,3 +2,10 @@ fastapi
 uvicorn
 requests
 python-dotenv
+
+authlib
+httpx
+itsdangerous
+
+databases
+asyncpg
