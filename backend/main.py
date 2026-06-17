@@ -11,6 +11,9 @@ from supabase_db import (
     fetch_all,
     execute
 )
+from pydantic import BaseModel
+import base64
+import requests
 
 
 
@@ -525,3 +528,223 @@ async def delete_signature(
     return {
         "success": True
     }
+    
+    
+#email template
+class EmailTemplateCreate(BaseModel):
+    template_name: str
+    subject: str
+    body: str
+
+class SendEmailRequest(BaseModel):
+    to_email: str
+    subject: str
+    body: str
+
+@app.post("/email-template")
+async def create_email_template(
+    data: EmailTemplateCreate,
+    request: Request
+):
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Not authenticated"
+        }
+
+    connection = await fetch_one(
+        """
+        SELECT id
+        FROM recruiting_saved.gmail_connections
+        WHERE email = :email
+        """,
+        {
+            "email": user["email"]
+        }
+    )
+
+    if not connection:
+        return {
+            "success": False,
+            "message": "No Gmail connection found"
+        }
+
+    await execute(
+        """
+        INSERT INTO recruiting_saved.email_templates
+        (
+            gmail_connection_id,
+            template_name,
+            subject,
+            body,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            :gmail_connection_id,
+            :template_name,
+            :subject,
+            :body,
+            NOW(),
+            NOW()
+        )
+        """,
+        {
+            "gmail_connection_id": connection["id"],
+            "template_name": data.template_name,
+            "subject": data.subject,
+            "body": data.body,
+        }
+    )
+
+    return {
+        "success": True
+    }
+    
+    
+#load email template 
+@app.get("/email-template")
+async def get_email_templates(request: Request):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    query = """
+    SELECT
+        et.id,
+        et.template_name,
+        et.subject,
+        et.body,
+        et.created_at
+
+    FROM recruiting_saved.email_templates et
+
+    JOIN recruiting_saved.gmail_connections gc
+        ON et.gmail_connection_id = gc.id
+
+    WHERE gc.email = :email
+
+    ORDER BY et.id DESC
+    """
+
+    data = await fetch_all(
+        query,
+        {
+            "email": user["email"]
+        }
+    )
+
+    return {
+        "success": True,
+        "data": [dict(row) for row in data]
+    }
+    
+#delete template email 
+@app.delete("/email-template/{template_id}")
+async def delete_email_template(
+    template_id: int,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    await execute(
+        """
+        DELETE FROM recruiting_saved.email_templates
+        WHERE id = :template_id
+        AND gmail_connection_id IN (
+            SELECT id
+            FROM recruiting_saved.gmail_connections
+            WHERE email = :email
+        )
+        """,
+        {
+            "template_id": template_id,
+            "email": user["email"]
+        }
+    )
+
+    return {
+        "success": True
+    }
+    
+    
+#send email 
+@app.post("/gmail/send-test")
+async def send_test_email(
+    data: SendEmailRequest,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    connection = await fetch_one(
+        """
+        SELECT access_token
+        FROM recruiting_saved.gmail_connections
+        WHERE email = :email
+        """,
+        {
+            "email": user["email"]
+        }
+    )
+
+    if not connection:
+        return {
+            "success": False,
+            "message": "No Gmail connection found"
+        }
+
+    access_token = connection["access_token"]
+
+    message = f"""To: {data.to_email}
+Subject: {data.subject}
+
+{data.body}
+"""
+
+    encoded_message = base64.urlsafe_b64encode(
+        message.encode("utf-8")
+    ).decode("utf-8")
+    
+
+    gmail_response = requests.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "raw": encoded_message
+        }
+    )
+    print("GMAIL RESPONSE:", gmail_response.text)
+
+
+    return {
+        "success": gmail_response.status_code == 200,
+        "gmail_status": gmail_response.status_code,
+        "gmail_response": gmail_response.json()
+    }
+
+
