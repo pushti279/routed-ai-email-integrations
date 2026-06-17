@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 const BACKEND_URL = "http://localhost:8000";
 
 export default function IntegrationsPage() {
   const [connected, setConnected] = useState(false);
   const [user, setUser] = useState<any>(null);
-  const [connections, setConnections] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [mailboxSettings, setMailboxSettings] = useState<any[]>([]);
   const [senderName, setSenderName] = useState("");
   const [maxEmails, setMaxEmails] = useState(100);
   const [signature, setSignature] = useState("");
   const mailbox = mailboxSettings[0];
   const [signatures, setSignatures] = useState<any[]>([]);
+  const [connections, setConnections] = useState<any[]>([]);
 
   const [showSignatureForm, setShowSignatureForm] =
   useState(false);
@@ -22,6 +24,8 @@ export default function IntegrationsPage() {
   useState("");
 
   const [newSignatureContent, setNewSignatureContent] = useState("");
+  const [loadingConnections, setLoadingConnections] =
+  useState(true);
   
 
   useEffect(() => {
@@ -36,11 +40,11 @@ export default function IntegrationsPage() {
 const loadConnections = async () => {
   try {
     const res = await fetch(
-  `${BACKEND_URL}/gmail/connections`,
-  {
-    credentials: "include",
-  }
-);
+      `${BACKEND_URL}/gmail/connections`,
+      {
+        credentials: "include",
+      }
+    );
 
     const data = await res.json();
 
@@ -49,9 +53,11 @@ const loadConnections = async () => {
     }
   } catch (error) {
     console.error(error);
+  } finally {
+    setLoadingConnections(false);
   }
-
 };
+
 
 const loadMailboxSettings = async () => {
   try {
@@ -271,6 +277,17 @@ const handleDeleteSignature = async (
     console.error(error);
   }
 };
+if (loadingConnections) {
+  return (
+    <div
+      style={{
+        padding: "30px",
+      }}
+    >
+      Loading integrations...
+    </div>
+  );
+}
   
   
  
@@ -301,20 +318,22 @@ const handleDeleteSignature = async (
           }}
         />
 
-        <button
-          style={{
-            padding: "14px 24px",
-            borderRadius: "8px",
-            border: "1px solid #ddd",
-            background: "white",
-            cursor: "pointer",
-          }}
-        >
-          Request Integration ↗
-        </button>
+      <Link
+  href="/integrations/request"
+  style={{
+    padding: "14px 24px",
+    borderRadius: "8px",
+    border: "1px solid #ddd",
+    background: "white",
+    cursor: "pointer",
+    textDecoration: "none",
+    color: "#111827",
+  }}
+>
+  Request Integration ↗
+</Link>
       </div>
-
-      <h1
+<h1
   style={{
     fontSize: "18px",
     fontWeight: 600,
@@ -325,16 +344,17 @@ const handleDeleteSignature = async (
   Email Integration
 </h1>
 
-      <p
+<p
   style={{
     fontSize: "14px",
     color: "#6b7280",
     marginBottom: "24px",
   }}
 >
-        Connect your email accounts to send automated
-        sequences
-      </p>
+  Connect your email accounts to send automated
+  sequences
+</p>
+
 
       {mailboxSettings.length === 0 && (
   <div
@@ -550,7 +570,72 @@ const handleDeleteSignature = async (
            </div>
 )}
 
+{mailboxSettings.length > 0 && (
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: "20px",
+      marginTop: "30px",
+      marginBottom: "30px",
+    }}
+  >
+    <Link
+      href="/gmail/templates"
+      style={{
+        background: "white",
+        border: "1px solid #ddd",
+        borderRadius: "12px",
+        padding: "24px",
+        textDecoration: "none",
+        color: "black",
+      }}
+    >
+      <h3>Templates</h3>
+      <p style={{ color: "#666" }}>
+        Create and manage email templates
+      </p>
+    </Link>
+
+    <Link
+      href="/gmail/signatures"
+      style={{
+        background: "white",
+        border: "1px solid #ddd",
+        borderRadius: "12px",
+        padding: "24px",
+        textDecoration: "none",
+        color: "black",
+      }}
+    >
+      <h3>Signatures</h3>
+      <p style={{ color: "#666" }}>
+        Create and manage signatures
+      </p>
+    </Link>
+
+    <Link
+      href="/email"
+      style={{
+        background: "white",
+        border: "1px solid #ddd",
+        borderRadius: "12px",
+        padding: "24px",
+        textDecoration: "none",
+        color: "black",
+      }}
+    >
+      <h3>Send Email</h3>
+      <p style={{ color: "#666" }}>
+        Create and send emails
+      </p>
+    </Link>
+  </div>
+)}
+
       {mailboxSettings.length > 0 && (
+
+        
         <div
           style={{
             marginTop: "40px",
@@ -570,114 +655,6 @@ const handleDeleteSignature = async (
 >
   Connected Mailboxes
 </h2>
-    <button
-  onClick={() =>
-    setShowSignatureForm(!showSignatureForm)
-  }
-  style={{
-    margin: "20px",
-    padding: "8px 14px",
-    borderRadius: "6px",
-    border: "1px solid #2563eb",
-    background: "#2563eb",
-    color: "white",
-    cursor: "pointer",
-  }}
->
-  + New Signature
-</button>
-
-{showSignatureForm && (
-  <div
-    style={{
-      padding: "20px",
-      borderTop: "1px solid #eee",
-      borderBottom: "1px solid #eee",
-      background: "#fafafa",
-    }}
-  >
-    <input
-      placeholder="Signature Name"
-      value={newSignatureName}
-      onChange={(e) =>
-        setNewSignatureName(e.target.value)
-      }
-      style={{
-        width: "100%",
-        padding: "10px",
-        marginBottom: "10px",
-      }}
-    />
-
-    <textarea
-      placeholder="Signature Content"
-      value={newSignatureContent}
-      onChange={(e) =>
-        setNewSignatureContent(e.target.value)
-      }
-      rows={5}
-      style={{
-        width: "100%",
-        padding: "10px",
-      }}
-    />
-
-    <button
-  onClick={handleCreateSignature}
-  style={{
-    marginTop: "12px",
-    padding: "8px 14px",
-    borderRadius: "6px",
-    border: "none",
-    background: "#2563eb",
-    color: "white",
-    cursor: "pointer",
-  }}
->
-  Create Signature
-</button>
-
-<hr style={{ margin: "20px 0" }} />
-
-<h3>Saved Signatures</h3>
-
-{signatures.map((signature) => (
-  <div
-    key={signature.id}
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "10px",
-      border: "1px solid #ddd",
-      borderRadius: "6px",
-      marginTop: "10px",
-      background: "white",
-    }}
-  >
-    <div>
-      <strong>{signature.name}</strong>
-    </div>
-
-    <button
-  onClick={() =>
-    handleDeleteSignature(signature.id)
-  }
-      style={{
-        border: "1px solid #ef4444",
-        background: "white",
-        color: "#ef4444",
-        borderRadius: "6px",
-        padding: "6px 10px",
-        cursor: "pointer",
-      }}
-    >
-      Delete
-    </button>
-  </div>
-))}
-  </div>
-)}
           <table
             style={{
               width: "100%",
@@ -796,21 +773,33 @@ onChange={(e) => setSignature(e.target.value)}
     Connected
   </td>
   <td style={{ padding: "14px" }}>
-  
-<button
-  onClick={() => handleDisconnect(item.id)}
-  style={{
-    border: "1px solid #ef4444",
-    background: "white",
-    color: "#ef4444",
-    borderRadius: "6px",
-    padding: "6px 10px",
-    cursor: "pointer",
-  }}
->
-  Disconnect
-</button>
+
+  <div
+    style={{
+      display: "flex",
+      gap: "8px",
+      flexWrap: "wrap",
+    }}
+  >
+
+    <button
+      onClick={() => handleDisconnect(item.id)}
+      style={{
+        border: "1px solid #ef4444",
+        background: "white",
+        color: "#ef4444",
+        borderRadius: "6px",
+        padding: "6px 10px",
+        cursor: "pointer",
+      }}
+    >
+      Disconnect
+    </button>
+
+  </div>
+
 </td>
+  
 </tr>
               ))}
             </tbody>

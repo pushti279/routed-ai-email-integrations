@@ -738,7 +738,7 @@ Subject: {data.subject}
             "raw": encoded_message
         }
     )
-    print("GMAIL RESPONSE:", gmail_response.text)
+   
 
 
     return {
