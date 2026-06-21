@@ -22,6 +22,21 @@ load_dotenv()
 
 app = FastAPI()
 
+async def refresh_google_token(
+    refresh_token: str
+):
+    response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+    )
+
+    return response.json()
+
 @app.on_event("startup")
 async def startup():
     await supabase_db.connect()
@@ -158,8 +173,6 @@ async def auth_callback(request: Request):
         }
     )
 
-    print("Connection ID:", connection["id"])
-
     # Check if mailbox settings already exist
     settings_exists = await fetch_one(
         """
@@ -255,16 +268,22 @@ async def get_connections(request: Request):
 
     query = """
     SELECT
-    id,
-    email,
-    google_user_id,
-    is_active,
-    created_at,
-    email as sender_name,
-    100 as max_emails_per_day,
-    'No signature' as signature
-    FROM recruiting_saved.gmail_connections
-    WHERE email = :email
+    gc.id,
+    gc.email,
+    gc.google_user_id,
+    gc.is_active,
+    gc.created_at,
+
+    gms.sender_name,
+    gms.max_emails_per_day,
+    gms.signature_name
+
+FROM recruiting_saved.gmail_connections gc
+
+LEFT JOIN recruiting_saved.gmail_mailbox_settings gms
+    ON gc.id = gms.gmail_connection_id
+
+WHERE gc.email = :email
     """
 
     data = await fetch_all(
@@ -294,20 +313,24 @@ async def get_mailbox_settings(request: Request):
 
     query = """
     SELECT
-        gc.id as gmail_connection_id,
-        gc.email,
+    gms.id,
+    gc.id as gmail_connection_id,
 
-        gms.id,
-        gms.sender_name,
-        gms.max_emails_per_day,
-        gms.signature_name
+    gc.email,
+    gc.google_user_id,
+    gc.is_active,
+    gc.created_at,
 
-    FROM recruiting_saved.gmail_connections gc
+    gms.sender_name,
+    gms.max_emails_per_day,
+    gms.signature_name
 
-    JOIN recruiting_saved.gmail_mailbox_settings gms
-        ON gc.id = gms.gmail_connection_id
+FROM recruiting_saved.gmail_connections gc
 
-    WHERE gc.email = :email
+LEFT JOIN recruiting_saved.gmail_mailbox_settings gms
+    ON gc.id = gms.gmail_connection_id
+
+WHERE gc.email = :email
     """
 
     data = await fetch_all(
@@ -540,6 +563,14 @@ class SendEmailRequest(BaseModel):
     to_email: str
     subject: str
     body: str
+    
+class SendBulkEmailRequest(BaseModel):
+    mailbox_id: int
+    template_id: int
+    signature_id: int
+    candidates: list
+    
+    
 
 @app.post("/email-template")
 async def create_email_template(
@@ -748,3 +779,191 @@ Subject: {data.subject}
     }
 
 
+#bulk email 
+@app.post("/gmail/send-bulk")
+async def send_bulk_email(
+    data: SendBulkEmailRequest,
+    request: Request
+):
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    connection = await fetch_one(
+        """
+        SELECT id, email, access_token, refresh_token
+        FROM recruiting_saved.gmail_connections
+        WHERE id = :mailbox_id
+        """,
+        {
+            "mailbox_id": data.mailbox_id
+        }
+    )
+
+    if not connection:
+        return {
+            "success": False,
+            "message": "No Gmail connection found"
+        }
+
+    access_token = connection["access_token"]
+
+    settings = await fetch_one(
+        """
+        SELECT max_emails_per_day
+        FROM recruiting_saved.gmail_mailbox_settings
+        WHERE gmail_connection_id = :id
+        """,
+        {
+            "id": data.mailbox_id
+        }
+    )
+
+    if settings:
+        if len(data.candidates) > settings["max_emails_per_day"]:
+            return {
+                "success": False,
+                "message": (
+                    f"Daily limit exceeded. "
+                    f"Maximum allowed: "
+                    f"{settings['max_emails_per_day']}"
+                )
+            }
+
+    template = await fetch_one(
+        """
+        SELECT subject, body
+        FROM recruiting_saved.email_templates
+        WHERE id = :id
+        """,
+        {
+            "id": data.template_id
+        }
+    )
+
+    if not template:
+        return {
+            "success": False,
+            "message": "Template not found"
+        }
+
+    signature = await fetch_one(
+        """
+        SELECT content
+        FROM recruiting_saved.gmail_signatures
+        WHERE id = :id
+        """,
+        {
+            "id": data.signature_id
+        }
+    )
+
+    if not signature:
+        return {
+            "success": False,
+            "message": "Signature not found"
+        }
+
+    sent_count = 0
+    last_response = None
+
+    for candidate in data.candidates:
+        body = template["body"]
+
+        body = body.replace(
+            "{{name}}",
+            candidate["name"]
+        )
+
+        body = body.replace(
+            "{{email}}",
+            candidate["email"]
+        )
+
+        final_body = (
+            body
+            + "\n\n"
+            + signature["content"]
+        )
+
+        message = f"""To: {candidate["email"]}
+Subject: {template["subject"]}
+
+{final_body}
+"""
+
+        encoded_message = base64.urlsafe_b64encode(
+            message.encode("utf-8")
+        ).decode("utf-8")
+
+        gmail_response = requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "raw": encoded_message
+            }
+        )
+
+        if gmail_response.status_code == 401:
+            refreshed = await refresh_google_token(
+                connection["refresh_token"]
+            )
+
+            if "access_token" not in refreshed:
+                return {
+                    "success": False,
+                    "reauthorize": True,
+                    "message": "Google authorization expired"
+                }
+
+            access_token = refreshed["access_token"]
+
+            await execute(
+                """
+                UPDATE recruiting_saved.gmail_connections
+                SET access_token = :token
+                WHERE id = :id
+                """,
+                {
+                    "token": access_token,
+                    "id": data.mailbox_id
+                }
+            )
+
+            gmail_response = requests.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "raw": encoded_message
+                }
+            )
+
+        if gmail_response.status_code == 200:
+            sent_count += 1
+
+        last_response = gmail_response
+
+    return {
+        "success": True,
+        "sent": sent_count,
+        "gmail_status": (
+            last_response.status_code
+            if last_response
+            else None
+        ),
+        "gmail_response": (
+            last_response.json()
+            if last_response
+            else None
+        )
+    }

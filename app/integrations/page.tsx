@@ -29,6 +29,8 @@ export default function IntegrationsPage() {
   
 
   useEffect(() => {
+  console.log("MAILBOX CHANGED:", mailbox);
+
   if (mailbox) {
     setSenderName(mailbox.sender_name || "");
     setMaxEmails(mailbox.max_emails_per_day || 100);
@@ -630,6 +632,24 @@ if (loadingConnections) {
         Create and send emails
       </p>
     </Link>
+
+    <Link
+  href="/gmail/bulk"
+  style={{
+    background: "white",
+    border: "1px solid #ddd",
+    borderRadius: "12px",
+    padding: "24px",
+    textDecoration: "none",
+    color: "black",
+  }}
+>
+  <h3>Bulk Email</h3>
+
+  <p style={{ color: "#666" }}>
+    Send personalized emails to multiple candidates
+  </p>
+</Link>
   </div>
 )}
 
@@ -724,9 +744,12 @@ onChange={(e) => setSenderName(e.target.value)}
   <input
     type="number"
     value={maxEmails}
-onChange={(e) => setMaxEmails(Number(e.target.value))}
+onChange={(e) => {
+  console.log("NEW VALUE:", e.target.value);
+  setMaxEmails(Number(e.target.value));
+}}
     min={1}
-    max={2000}
+    max={100}
     style={{
       padding: "8px",
       border: "1px solid #ddd",
@@ -781,6 +804,21 @@ onChange={(e) => setSignature(e.target.value)}
       flexWrap: "wrap",
     }}
   >
+
+    <button
+  onClick={handleSave}
+  style={{
+    border: "1px solid #2563eb",
+    background: "#2563eb",
+    color: "white",
+    borderRadius: "6px",
+    padding: "6px 10px",
+    cursor: "pointer",
+  }}
+>
+  Save
+</button>
+    
 
     <button
       onClick={() => handleDisconnect(item.id)}
