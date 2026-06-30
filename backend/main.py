@@ -629,35 +629,35 @@ async def create_email_sequence(
             "success": False,
             "message": "Mailbox not found"
         }
-
+        
+        
     await execute(
-        """
-        INSERT INTO recruiting_saved.email_sequences
-        (
-            name,
-            mailbox_id,
-            created_by,
-            status,
-            created_at,
-            updated_at
-        )
-        VALUES
-        (  
-            :name,
-            :mailbox_id,
-            :created_by,
-            'draft',
-            NOW(),
-            NOW()
-        )
-        """,
-        {
-            "name": data.name,
-            "mailbox_id": data.mailbox_id,
-            "created_by": user["email"]
-        }
+    """
+    INSERT INTO recruiting_saved.email_sequences
+    (
+        name,
+        mailbox_id,
+        created_by,
+        status,
+        created_at,
+        updated_at
     )
-
+    VALUES
+    (
+        :name,
+        :mailbox_id,
+        :created_by,
+        'draft',
+        NOW(),
+        NOW()
+    )
+    """,
+    {
+        "name": data.name,
+        "mailbox_id": data.mailbox_id,
+        "created_by": user["email"]
+    }
+)
     return {
         "success": True,
         "message": "Sequence created successfully"
