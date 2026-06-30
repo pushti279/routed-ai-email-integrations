@@ -27,3 +27,14 @@ async def fetch_all(query, values=None):
 
 async def execute(query, values=None):
     return await supabase_db.execute(query=query, values=values)
+
+async def fetch_val(query, values=None):
+    row = await supabase_db.fetch_one(
+        query=query,
+        values=values
+    )
+
+    if row:
+        return list(row.values())[0]
+
+    return 0

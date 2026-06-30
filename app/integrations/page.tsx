@@ -170,6 +170,8 @@ const handleSave = async () => {
     console.error(error);
   }
 };
+
+
 const handleDisconnect = async (
   connectionId: number
 ) => {
@@ -648,6 +650,24 @@ if (loadingConnections) {
 
   <p style={{ color: "#666" }}>
     Send personalized emails to multiple candidates
+  </p>
+</Link>
+
+<Link
+  href="/sequences"
+  style={{
+    background: "white",
+    border: "1px solid #ddd",
+    borderRadius: "12px",
+    padding: "24px",
+    textDecoration: "none",
+    color: "black",
+  }}
+>
+  <h3>Email Sequences</h3>
+
+  <p style={{ color: "#666" }}>
+    Create automated multi-step email campaigns
   </p>
 </Link>
   </div>

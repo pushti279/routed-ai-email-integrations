@@ -9,11 +9,13 @@ from supabase_db import (
     supabase_db,
     fetch_one,
     fetch_all,
+    fetch_val, #added new
     execute
 )
 from pydantic import BaseModel
 import base64
 import requests
+from datetime import datetime, timedelta, timezone
 
 
 
@@ -569,9 +571,783 @@ class SendBulkEmailRequest(BaseModel):
     template_id: int
     signature_id: int
     candidates: list
+#------------------new addition --------------  
+#sequence build 
+class CreateSequenceRequest(BaseModel):
+    name: str
+    mailbox_id: int
     
+class CreateSequenceStepRequest(BaseModel):
+    sequence_id: int
+    template_id: int
+    delay_value: int
+    delay_unit: str
     
 
+
+class CandidateEnrollment(BaseModel):
+    name: str
+    email: str
+
+class EnrollCandidatesRequest(BaseModel):
+    sequence_id: int
+    candidates: list[CandidateEnrollment]
+    
+    
+# Create Email Sequence-----------------------
+@app.post("/email-sequences")
+async def create_email_sequence(
+    data: CreateSequenceRequest,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    connection = await fetch_one(
+        """
+        SELECT id
+        FROM recruiting_saved.gmail_connections
+        WHERE id = :mailbox_id
+        AND email = :email
+        """,
+        {
+            "mailbox_id": data.mailbox_id,
+            "email": user["email"]
+        }
+    )
+
+    if not connection:
+        return {
+            "success": False,
+            "message": "Mailbox not found"
+        }
+
+    await execute(
+        """
+        INSERT INTO recruiting_saved.email_sequences
+        (
+            name,
+            mailbox_id,
+            created_by,
+            status,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            :name,
+            :mailbox_id,
+            :created_by,
+            'draft',
+            NOW(),
+            NOW()
+        )
+        """,
+        {
+            "name": data.name,
+            "mailbox_id": data.mailbox_id,
+            "created_by": user["email"]
+        }
+    )
+
+    return {
+        "success": True,
+        "message": "Sequence created successfully"
+    }
+    
+# Get Email Sequences -------------------
+@app.get("/email-sequences")
+async def get_email_sequences(request: Request):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    query = """
+SELECT
+    es.id,
+    es.name,
+    es.status,
+    es.created_at,
+    gc.email AS mailbox_email,
+
+    COUNT(DISTINCT ess.id) AS step_count,
+    COUNT(DISTINCT se.id) AS candidate_count
+
+FROM recruiting_saved.email_sequences es
+
+JOIN recruiting_saved.gmail_connections gc
+    ON es.mailbox_id = gc.id
+
+LEFT JOIN recruiting_saved.email_sequence_steps ess
+    ON ess.sequence_id = es.id
+
+LEFT JOIN recruiting_saved.sequence_enrollments se
+    ON se.sequence_id = es.id
+
+WHERE es.created_by = :email
+
+GROUP BY
+    es.id,
+    es.name,
+    es.status,
+    es.created_at,
+    gc.email
+
+ORDER BY es.id DESC
+"""
+
+    data = await fetch_all(
+        query,
+        {
+            "email": user["email"]
+        }
+    )
+
+    return {
+        "success": True,
+        "data": [dict(row) for row in data]
+    }
+    
+    
+# Get Single Email Sequence
+@app.get("/email-sequences/{sequence_id}")
+async def get_email_sequence(
+    sequence_id: int,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    sequence = await fetch_one(
+        """
+        SELECT
+            es.id,
+            es.name,
+            es.status,
+            es.created_at,
+            gc.email AS mailbox_email,
+            gc.id AS mailbox_id
+
+        FROM recruiting_saved.email_sequences es
+
+        JOIN recruiting_saved.gmail_connections gc
+            ON es.mailbox_id = gc.id
+
+        WHERE es.id = :sequence_id
+        AND es.created_by = :email
+        """,
+        {
+            "sequence_id": sequence_id,
+            "email": user["email"]
+        }
+    )
+
+    if not sequence:
+        return {
+            "success": False,
+            "message": "Sequence not found"
+        }
+
+    return {
+        "success": True,
+        "data": dict(sequence)
+    }
+    
+    
+# Create Sequence Step------------------
+@app.post("/email-sequence-steps")
+async def create_sequence_step(
+    data: CreateSequenceStepRequest,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    sequence = await fetch_one(
+        """
+        SELECT id
+        FROM recruiting_saved.email_sequences
+        WHERE id = :sequence_id
+        AND created_by = :email
+        """,
+        {
+            "sequence_id": data.sequence_id,
+            "email": user["email"]
+        }
+    )
+
+    if not sequence:
+        return {
+            "success": False,
+            "message": "Sequence not found"
+        }
+    step_count = await fetch_val(
+        """
+           SELECT COUNT(*)
+           FROM recruiting_saved.email_sequence_steps
+           WHERE sequence_id = :sequence_id
+           """,
+          {
+        "sequence_id": data.sequence_id
+         }
+        )
+
+    step_number = step_count + 1
+    display_order = step_number * 100
+
+    await execute(
+        """
+        INSERT INTO recruiting_saved.email_sequence_steps
+        (
+          sequence_id,
+step_number,
+display_order,
+step_type,
+template_id,
+delay_value,
+delay_unit,
+created_at
+        )
+        VALUES
+        (
+            
+              :sequence_id,
+:step_number,
+:display_order,
+'email',
+:template_id,
+:delay_value,
+:delay_unit,
+NOW()
+
+        )
+        """,
+        
+{
+    "sequence_id": data.sequence_id,
+    "step_number": step_number,
+    "display_order": display_order,
+    "template_id": data.template_id,
+    "delay_value": data.delay_value,
+    "delay_unit": data.delay_unit
+}
+
+    )
+
+    return {
+        "success": True,
+        "message": "Sequence step created successfully"
+    }
+    
+# Get Sequence Steps--------------------------
+@app.get("/email-sequence-steps/{sequence_id}")
+async def get_sequence_steps(
+    sequence_id: int,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    query = """
+    SELECT
+    ess.id,
+    ess.step_number,
+    ess.display_order,
+    ess.step_type,
+    ess.template_id,
+    et.template_name,
+    ess.delay_value,
+    ess.delay_unit
+
+    FROM recruiting_saved.email_sequence_steps ess
+
+    JOIN recruiting_saved.email_sequences es
+        ON ess.sequence_id = es.id
+
+    JOIN recruiting_saved.email_templates et
+        ON ess.template_id = et.id
+
+    WHERE ess.sequence_id = :sequence_id
+    AND es.created_by = :email
+
+   ORDER BY ess.display_order
+    """
+
+    data = await fetch_all(
+        query,
+        {
+            "sequence_id": sequence_id,
+            "email": user["email"]
+        }
+    )
+
+    return {
+        "success": True,
+        "data": [dict(row) for row in data]
+    }
+    
+    
+# Sequence Builder
+@app.get("/sequence-builder/{sequence_id}")
+async def get_sequence_builder(
+    sequence_id: int,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    sequence = await fetch_one(
+        """
+        SELECT
+            es.id,
+            es.name,
+            es.status,
+            gc.id AS mailbox_id,
+            gc.email AS mailbox_email
+
+        FROM recruiting_saved.email_sequences es
+
+        JOIN recruiting_saved.gmail_connections gc
+            ON es.mailbox_id = gc.id
+
+        WHERE
+            es.id = :sequence_id
+            AND es.created_by = :email
+        """,
+        {
+            "sequence_id": sequence_id,
+            "email": user["email"]
+        }
+    )
+
+    if not sequence:
+        return {
+            "success": False,
+            "message": "Sequence not found"
+        }
+
+    steps = await fetch_all(
+        """
+        SELECT
+            ess.id,
+            ess.step_number,
+            ess.display_order,
+            ess.step_type,
+            ess.template_id,
+            et.template_name,
+            ess.delay_value,
+            ess.delay_unit
+
+        FROM recruiting_saved.email_sequence_steps ess
+
+        JOIN recruiting_saved.email_templates et
+            ON ess.template_id = et.id
+
+        WHERE ess.sequence_id = :sequence_id
+
+        ORDER BY ess.display_order
+        """,
+        {
+            "sequence_id": sequence_id
+        }
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "sequence": dict(sequence),
+            "steps": [dict(row) for row in steps]
+        }
+    }
+    
+    
+@app.get("/candidates")
+async def get_candidates():
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "name": "Pushti Nirma",
+                "email": "23bce272@nirmauni.ac.in"
+            },
+            {
+                "name": "Shreni Shah",
+                "email": "shreni1499@gmail.com"
+            },
+            {
+                "name": "Hirak Patel",
+                "email": "hirakpatidar@gmail.com"
+            },
+            {
+                "name": "Anjali Agrawal",
+                "email": "anjaliagrawal3097@gmail.com"
+            },
+            {
+                "name": "IEEE WIE NU",
+                "email": "ieeewienu@gmail.com"
+            }
+        ]
+    }
+    
+# Start Sequence
+@app.post("/email-sequences/{sequence_id}/start")
+async def start_sequence(
+    sequence_id: int,
+    request: Request
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized"
+        }
+
+    sequence = await fetch_one(
+        """
+        SELECT id
+        FROM recruiting_saved.email_sequences
+        WHERE id = :sequence_id
+        AND created_by = :email
+        """,
+        {
+            "sequence_id": sequence_id,
+            "email": user["email"]
+        }
+    )
+
+    if not sequence:
+        return {
+            "success": False,
+            "message": "Sequence not found"
+        }
+
+    # Make sure candidates are enrolled
+    enrollment_count = await fetch_one(
+        """
+        SELECT COUNT(*) AS total
+        FROM recruiting_saved.sequence_enrollments
+        WHERE sequence_id = :sequence_id
+        """,
+        {
+            "sequence_id": sequence_id
+        }
+    )
+
+    if enrollment_count["total"] == 0:
+        return {
+            "success": False,
+            "message": "Please enroll candidates before starting the sequence."
+        }
+
+    # Update sequence status
+    await execute(
+        """
+        UPDATE recruiting_saved.email_sequences
+        SET
+            status = 'running',
+            updated_at = NOW()
+        WHERE id = :sequence_id
+        """,
+        {
+            "sequence_id": sequence_id
+        }
+    )
+
+    # Activate enrolled candidates
+    await execute(
+        """
+        UPDATE recruiting_saved.sequence_enrollments
+        SET
+            status = 'running',
+            next_send_at = NOW()
+        WHERE sequence_id = :sequence_id
+        """,
+        {
+            "sequence_id": sequence_id
+        }
+    )
+
+    return {
+        "success": True,
+        "message": "Sequence started successfully"
+    }
+    
+@app.post("/sequence-enrollments")
+async def enroll_candidates(
+    payload: EnrollCandidatesRequest,
+    request: Request,
+):
+
+    user = request.session.get("user")
+
+    if not user:
+        return {
+            "success": False,
+            "message": "Unauthorized",
+        }
+
+    # Remove existing enrollments for this sequence
+    await execute(
+        """
+        DELETE FROM recruiting_saved.sequence_enrollments
+        WHERE sequence_id = :sequence_id
+        """,
+        {
+            "sequence_id": payload.sequence_id,
+        },
+    )
+
+    # Insert selected candidates
+    for candidate in payload.candidates:
+
+        await execute(
+            """
+            INSERT INTO recruiting_saved.sequence_enrollments
+            (
+                sequence_id,
+                candidate_name,
+                candidate_email,
+                current_step,
+                status,
+                next_send_at,
+                created_at
+            )
+            VALUES
+            (
+                :sequence_id,
+                :candidate_name,
+                :candidate_email,
+                1,
+                'pending',
+                NOW(),
+                NOW()
+            )
+            """,
+            {
+                "sequence_id": payload.sequence_id,
+                "candidate_name": candidate.name,
+                "candidate_email": candidate.email,
+            },
+        )
+
+    return {
+        "success": True,
+        "message": "Candidates enrolled successfully",
+    }
+    
+# Scheduler
+@app.post("/scheduler/run")
+async def run_scheduler():
+
+    enrollments = await fetch_all(
+        """
+        SELECT *
+        FROM recruiting_saved.sequence_enrollments
+        WHERE status = 'running'
+        AND next_send_at <= NOW()
+        """
+    )
+
+    for enrollment in enrollments:
+
+        print("Processing:", enrollment["candidate_email"])
+
+        step = await fetch_one(
+            """
+            SELECT *
+            FROM recruiting_saved.email_sequence_steps
+            WHERE sequence_id = :sequence_id
+            AND step_number = :step
+            """,
+            {
+                "sequence_id": enrollment["sequence_id"],
+                "step": enrollment["current_step"],
+            },
+        )
+
+        if not step:
+            continue
+
+        template = await fetch_one(
+            """
+            SELECT subject, body
+            FROM recruiting_saved.email_templates
+            WHERE id = :template_id
+            """,
+            {
+                "template_id": step["template_id"],
+            },
+        )
+
+        if not template:
+            continue
+
+        sequence = await fetch_one(
+            """
+            SELECT mailbox_id
+            FROM recruiting_saved.email_sequences
+            WHERE id = :id
+            """,
+            {
+                "id": enrollment["sequence_id"],
+            },
+        )
+
+        if not sequence:
+            continue
+
+        mailbox = await fetch_one(
+            """
+            SELECT *
+            FROM recruiting_saved.gmail_connections
+            WHERE id = :id
+            """,
+            {
+                "id": sequence["mailbox_id"],
+            },
+        )
+
+        if not mailbox:
+            continue
+
+        gmail_response = await send_sequence_email(
+            mailbox,
+            template,
+            enrollment["candidate_name"],
+            enrollment["candidate_email"],
+        )
+
+        print("GMAIL STATUS:", gmail_response.status_code)
+
+        if gmail_response.status_code != 200:
+            print(gmail_response.text)
+            continue
+
+        next_step = await fetch_one(
+            """
+            SELECT *
+            FROM recruiting_saved.email_sequence_steps
+            WHERE sequence_id = :sequence_id
+            AND step_number = :step
+            """,
+            {
+                "sequence_id": enrollment["sequence_id"],
+                "step": enrollment["current_step"] + 1,
+            },
+        )
+
+        if next_step:
+
+            next_send = datetime.now(timezone.utc) + timedelta(
+                days=next_step["delay_value"]
+            )
+
+            await execute(
+                """
+                UPDATE recruiting_saved.sequence_enrollments
+                SET
+                    current_step = :step_number,
+                    last_sent_at = NOW(),
+                    next_send_at = :next_send
+                WHERE id = :id
+                """,
+                {
+                    "step_number": next_step["step_number"],
+                    "next_send": next_send,
+                    "id": enrollment["id"],
+                },
+            )
+
+            print(f"Moved to Step {next_step['step_number']}")
+
+        else:
+
+            await execute(
+                """
+                UPDATE recruiting_saved.sequence_enrollments
+                SET
+                    status = 'completed',
+                    completed_at = NOW(),
+                    last_sent_at = NOW()
+                WHERE id = :id
+                """,
+                {
+                    "id": enrollment["id"],
+                },
+            )
+
+            remaining = await fetch_one(
+                """
+                SELECT COUNT(*) AS count
+                FROM recruiting_saved.sequence_enrollments
+                WHERE sequence_id = :sequence_id
+                AND status <> 'completed'
+                """,
+                {
+                    "sequence_id": enrollment["sequence_id"],
+                },
+            )
+
+            if remaining["count"] == 0:
+
+                await execute(
+                    """
+                    UPDATE recruiting_saved.email_sequences
+                    SET
+                        status = 'completed',
+                        updated_at = NOW()
+                    WHERE id = :sequence_id
+                    """,
+                    {
+                        "sequence_id": enrollment["sequence_id"],
+                    },
+                )
+
+                print("Sequence completed")
+
+    return {
+        "success": True,
+        "count": len(enrollments),
+    }
+#email template ------old-------------
 @app.post("/email-template")
 async def create_email_template(
     data: EmailTemplateCreate,
@@ -777,6 +1553,84 @@ Subject: {data.subject}
         "gmail_status": gmail_response.status_code,
         "gmail_response": gmail_response.json()
     }
+    
+
+#helper function
+async def send_sequence_email(
+    connection,
+    template,
+    candidate_name,
+    candidate_email,
+):
+
+    access_token = connection["access_token"]
+
+    body = (
+        template["body"]
+        .replace("{{name}}", candidate_name)
+        .replace("{{email}}", candidate_email)
+    )
+
+    message = f"""To: {candidate_email}
+Subject: {template["subject"]}
+
+{body}
+"""
+
+    encoded_message = base64.urlsafe_b64encode(
+        message.encode("utf-8")
+    ).decode("utf-8")
+
+    def send_request(token):
+        return requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "raw": encoded_message
+            },
+        )
+
+    gmail_response = send_request(access_token)
+
+    # Token expired
+    if gmail_response.status_code == 401:
+
+        print("Access token expired. Refreshing...")
+
+        refreshed = await refresh_google_token(
+            connection["refresh_token"]
+        )
+
+        if "access_token" not in refreshed:
+
+            print("Refresh failed:", refreshed)
+
+            return gmail_response
+
+        access_token = refreshed["access_token"]
+
+        # Save new token in DB
+        await execute(
+            """
+            UPDATE recruiting_saved.gmail_connections
+            SET
+                access_token = :token,
+                update_at = NOW()
+            WHERE id = :id
+            """,
+            {
+                "token": access_token,
+                "id": connection["id"],
+            },
+        )
+
+        # Retry
+        gmail_response = send_request(access_token)
+
+    return gmail_response
 
 
 #bulk email 
