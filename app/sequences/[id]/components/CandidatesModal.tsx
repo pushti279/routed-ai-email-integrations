@@ -14,7 +14,8 @@ export default function CandidatesModal({
     sequenceId,
 }: CandidatesModalProps)  {
 
-    const BACKEND_URL = "http://localhost:8000";
+    const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
     const [candidates, setCandidates] = useState<any[]>([]);
     const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);

@@ -13,7 +13,8 @@ export default function SequencesPage() {
     const [selectedMailbox, setSelectedMailbox] = useState("");
     const [mailboxes, setMailboxes] = useState([]);
 
-    const BACKEND_URL = "http://localhost:8000";
+  const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
     const router = useRouter();
 
 

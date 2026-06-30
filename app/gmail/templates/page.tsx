@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const BACKEND_URL = "http://localhost:8000";
-
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 export default function TemplatesPage() {
 
   const [templates, setTemplates] = useState<any[]>([]);

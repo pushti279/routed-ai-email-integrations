@@ -11,7 +11,8 @@ import CandidatesModal from "./components/CandidatesModal";
 export default function SequenceBuilderPage() {
     const params = useParams();
 
-    const BACKEND_URL = "http://localhost:8000";
+   const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
     const [sequence, setSequence] = useState<any>(null);
     const [steps, setSteps] = useState<any[]>([]);

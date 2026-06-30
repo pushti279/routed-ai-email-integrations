@@ -9,33 +9,34 @@ export default function EmailPage() {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [signatures, setSignatures] = useState<any[]>([]);
   const [selectedSignature, setSelectedSignature] = useState("");
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL!;
 
   const sendEmail = async () => {
-    const response = await fetch(
-      "http://localhost:8000/gmail/send-test",
-      {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          to_email: toEmail,
-          subject,
-          body,
-        }),
-      }
-    );
+  const response = await fetch(
+    `${BACKEND_URL}/gmail/send-test`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to_email: toEmail,
+        subject,
+        body,
+      }),
+    }
+  );
 
-    const data = await response.json();
+  const data = await response.json();
 
-    alert(JSON.stringify(data));
-  };
+  alert(JSON.stringify(data));
+};
 
   const loadTemplates = async () => {
   try {
     const res = await fetch(
-      "http://localhost:8000/email-template",
+      `${BACKEND_URL}/email-template`,
       {
         credentials: "include",
       }
@@ -51,11 +52,13 @@ export default function EmailPage() {
   }
 };
 
+
 const loadSignatures = async () => {
   try {
 
+
     const res = await fetch(
-      "http://localhost:8000/gmail/signatures",
+      `${BACKEND_URL}/gmail/signatures`,
       {
         credentials: "include",
       }
@@ -66,7 +69,7 @@ const loadSignatures = async () => {
     if (data.success) {
       setSignatures(data.data);
     }
-
+    
   } catch (error) {
     console.error(error);
   }
