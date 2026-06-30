@@ -52,7 +52,9 @@ async def shutdown():
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY"),
-    max_age=86400
+    max_age=86400,
+    same_site="none",
+    https_only=True,
 )
 
 # CORS Middleware
@@ -640,7 +642,7 @@ async def create_email_sequence(
             updated_at
         )
         VALUES
-        (
+        (  
             :name,
             :mailbox_id,
             :created_by,
